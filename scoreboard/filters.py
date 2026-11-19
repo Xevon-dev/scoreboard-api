@@ -1,15 +1,20 @@
-from django_filters import rest_framework as filters
 from django.db.models import Q
+from django_filters import rest_framework as filters
+
 from .models import Match
 
-def filter_by_team(qs,name, value):
-    """Фільтр по команді: OR по home і away."""
-    return qs.filter(Q(home=value) | Q(away=value))
 
 class MatchFilter(filters.FilterSet):
-    team = filters.NumberFilter(field_name="price", method=filter_by_team)
     status = filters.ChoiceFilter(choices=Match.Status.choices)
+    tournament = filters.NumberFilter(field_name="tournament")
+    team = filters.NumberFilter(method="filter_by_team")
 
     class Meta:
         model = Match
-        fields = ['team', 'status']
+        fields = ["status", "tournament", "team"]
+
+    def filter_by_team(self, queryset, name, value):
+        """Фільтр по команді: OR по home і away."""
+        if value is None:
+            return queryset
+        return queryset.filter(Q(home_id=value) | Q(away_id=value))

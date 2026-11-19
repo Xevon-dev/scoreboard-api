@@ -1,16 +1,45 @@
 """В'юхи табло: турніри (read-only), матчі (+ події через @action), табло."""
+from django.db.models import Count, F, Prefetch, Q
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, renderer_classes
+from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.reverse import reverse
-from .filters import MatchFilter
-from rest_framework.filters import SearchFilter,OrderingFilter
-from .pagination import StandardResultsSetPagination
-from rest_framework_csv import renderers as r
 
-from .models import Match, Tournament
-from .serializers import EventSerializer, MatchSerializer, TournamentSerializer , MatchDetailSerializer
+from .filters import MatchFilter
+from .models import Event, Match, Tournament
+from .pagination import StandardResultsSetPagination
+from .renderers import ScoreboardCSVRenderer
+from .serializers import (
+    EventSerializer,
+    MatchDetailSerializer,
+    MatchSerializer,
+    TournamentSerializer,
+)
+
+
+POLL_MIN_SECONDS, POLL_MAX_SECONDS = 5, 300
+
+
+def poll_after_seconds(live_count):
+    if live_count:
+        return POLL_MIN_SECONDS
+
+    next_start = (
+        Match.objects
+        .filter(status=Match.Status.SCHEDULED, starts_at__gt=timezone.now())
+        .order_by("starts_at")
+        .values_list("starts_at", flat=True)
+        .first()
+    )
+    if next_start is None:
+        return POLL_MAX_SECONDS
+
+    seconds = int((next_start - timezone.now()).total_seconds())
+    return max(POLL_MIN_SECONDS, min(POLL_MAX_SECONDS, seconds))
 
 
 # Єдині дозволені переходи стану.
@@ -25,30 +54,56 @@ def conflict(detail, code):
     return Response({"detail": detail, "code": code}, status=status.HTTP_409_CONFLICT)
 
 
+def match_queryset():
+    return (
+        Match.objects
+        .select_related("tournament", "home", "away")
+        .annotate(
+            home_goals=Count(
+                "events",
+                filter=Q(events__kind=Event.Kind.GOAL, events__team=F("home")),
+            ),
+            away_goals=Count(
+                "events",
+                filter=Q(events__kind=Event.Kind.GOAL, events__team=F("away")),
+            ),
+        )
+        .order_by("starts_at", "id")
+    )
+
+
 class TournamentViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Tournament.objects.all()
+    queryset = (
+        Tournament.objects
+        .annotate(matches_total=Count("matches"))
+        .order_by("starts_on", "id")
+    )
     serializer_class = TournamentSerializer
     lookup_field = "slug"
 
 
 class MatchViewSet(viewsets.ModelViewSet):
-    queryset = Match.objects.all()
     # serializer_class = MatchSerializer
     # Без "put": повна заміна матчу контрактом не передбачена → 405.
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
-    filter_backends = [DjangoFilterBackend, SearchFilter,OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = MatchFilter
     search_fields = ["home__name", "away__name"]
-    ordering_fields = ["starts_at"]
+    ordering_fields = ["starts_at", "status"]
     pagination_class = StandardResultsSetPagination
-    renderer_classes = [r.CSVRenderer]
 
+    def get_queryset(self):
+        queryset = match_queryset()
+        if self.action == "retrieve":
+            queryset = queryset.prefetch_related(
+                Prefetch("events", queryset=Event.objects.select_related("team"))
+            )
+        return queryset
 
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        if self.action == "retrieve":
             return MatchDetailSerializer
         return MatchSerializer
-
 
     def perform_create(self, serializer):
         # status із тіла запиту ігноруємо: новий матч завжди scheduled.
@@ -108,10 +163,12 @@ class MatchViewSet(viewsets.ModelViewSet):
 
 
 @api_view(["GET"])
+@renderer_classes([JSONRenderer, ScoreboardCSVRenderer])
 def scoreboard(request):
     """Зведений звіт: матчі, що тривають, голим масивом, за starts_at."""
-    matches = Match.objects.filter(status=Match.Status.LIVE).order_by("starts_at", "-id")
-    return Response(MatchSerializer(matches, many=True).data)
-
-
-
+    matches = match_queryset().filter(status=Match.Status.LIVE)
+    data = MatchSerializer(matches, many=True).data
+    response = Response(data)
+    response["X-Live-Count"] = str(len(data))
+    response["X-Poll-After"] = str(poll_after_seconds(len(data)))
+    return response

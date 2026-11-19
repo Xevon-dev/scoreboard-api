@@ -15,18 +15,17 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "scoreboard",
-    'django_filters',
-    "corsheaders"
+    "django_filters",
+    "corsheaders",
 ]
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
-    "django.middleware.common.CommonMiddleware"
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -64,12 +63,17 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "scoreboard.pagination.StandardResultsSetPagination",
     "PAGE_SIZE": 20,
 }
 
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+]
+
+CORS_EXPOSE_HEADERS = [
+    "X-Live-Count",
+    "X-Poll-After",
 ]
 

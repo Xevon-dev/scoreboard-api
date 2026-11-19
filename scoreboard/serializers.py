@@ -9,7 +9,7 @@ from .models import Event, Match, Tournament
 
 class TournamentSerializer(serializers.ModelSerializer):
     # Лише читання: кількість матчів турніру (related_name="matches").
-    matches_count = serializers.IntegerField(source="matches.count", read_only=True)
+    matches_count = serializers.IntegerField(source="matches_total", read_only=True)
 
     class Meta:
         model = Tournament
@@ -30,16 +30,17 @@ class MatchSerializer(serializers.ModelSerializer):
             "home_name", "away_name", "starts_at", "status", "score"
         ]
 
-
-
-
     def get_score(self, obj):
         """Рахунок не зберігається — рахуємо лише з подій kind="goal"."""
-        goals = obj.events.filter(kind=Event.Kind.GOAL)
-        return {
-            "home": goals.filter(team_id=obj.home_id).count(),
-            "away": goals.filter(team_id=obj.away_id).count(),
-        }
+        home = getattr(obj, "home_goals", None)
+        away = getattr(obj, "away_goals", None)
+        if home is None or away is None:
+            goals = obj.events.filter(kind=Event.Kind.GOAL)
+            return {
+                "home": goals.filter(team_id=obj.home_id).count(),
+                "away": goals.filter(team_id=obj.away_id).count(),
+            }
+        return {"home": home, "away": away}
 
     def validate(self, attrs):
         # При PATCH у attrs може не бути home/away — беремо їх із наявного матчу.
@@ -52,13 +53,6 @@ class MatchSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class MatchDetailSerializer(MatchSerializer):
-    url = serializers.HyperlinkedIdentityField(view_name='match-detail')
-    tournament_name = serializers.StringRelatedField(source ='tournament.name')
-    class Meta(MatchSerializer.Meta):
-            fields = MatchSerializer.Meta.fields + ['url' , 'tournament_name']
-            
-
 class EventSerializer(serializers.ModelSerializer):
     team_name = serializers.CharField(source="team.name", read_only=True)
 
@@ -68,11 +62,16 @@ class EventSerializer(serializers.ModelSerializer):
 
     def validate_team(self, team):
         # Матч передає в'юха: EventSerializer(data=..., context={"match": match})
-        match = self.context["match"]
-        if team.pk not in (match.home_id, match.away_id):
+        match = self.context.get("match")
+        if match is not None and team.pk not in (match.home_id, match.away_id):
             raise serializers.ValidationError("Команда не грає в цьому матчі.")
         return team
 
 
+class MatchDetailSerializer(MatchSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name="match-detail")
+    tournament_name = serializers.CharField(source="tournament.name", read_only=True)
+    events = EventSerializer(many=True, read_only=True)
 
-
+    class Meta(MatchSerializer.Meta):
+        fields = MatchSerializer.Meta.fields + ["url", "tournament_name", "events"]
