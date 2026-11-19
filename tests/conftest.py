@@ -1,4 +1,4 @@
-"""Спільна обв'язка black-box тестів ПР №2.16.3.
+"""Спільна обв'язка black-box тестів ПР №2.17.3.
 
 Тести нічого не знають про проєкт студента: ні моделей, ні settings, ні
 назв в'юх. Є лише базова адреса і HTTP. Тому той самий набір перевіряє
@@ -191,3 +191,32 @@ def live_match(api, new_match):
         f"PATCH scheduled → live віддав {response.status_code}: {response.text[:300]}"
     )
     return response.json()
+
+
+@pytest.fixture(scope="session")
+def live_seeded_match(seeded_matches):
+    """Сидований матч у стані live — на ньому перевіряється табло і фільтр."""
+    for match in seeded_matches:
+        if match["status"] == "live":
+            return match
+    pytest.skip("Серед сидованих матчів немає матчу, що триває.")
+
+
+@pytest.fixture(scope="session")
+def scheduled_seeded_match(seeded_matches):
+    for match in seeded_matches:
+        if match["status"] == "scheduled":
+            return match
+    pytest.skip("Серед сидованих матчів немає запланованого.")
+
+
+def all_items(api, path):
+    """Усі елементи списку, скільки б сторінок він не мав."""
+    collected, url = [], path
+    while url:
+        response = api.get(url) if url.startswith("/") else api.session.get(url, timeout=TIMEOUT)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        collected.extend(items(body))
+        url = body.get("next") if isinstance(body, dict) else None
+    return collected

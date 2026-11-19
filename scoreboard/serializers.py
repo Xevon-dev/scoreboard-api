@@ -27,8 +27,11 @@ class MatchSerializer(serializers.ModelSerializer):
         model = Match
         fields = [
             "id", "tournament", "home", "away",
-            "home_name", "away_name", "starts_at", "status", "score",
+            "home_name", "away_name", "starts_at", "status", "score"
         ]
+
+
+
 
     def get_score(self, obj):
         """Рахунок не зберігається — рахуємо лише з подій kind="goal"."""
@@ -49,6 +52,13 @@ class MatchSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class MatchDetailSerializer(MatchSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='match-detail')
+    tournament_name = serializers.StringRelatedField(source ='tournament.name')
+    class Meta(MatchSerializer.Meta):
+            fields = MatchSerializer.Meta.fields + ['url' , 'tournament_name']
+            
+
 class EventSerializer(serializers.ModelSerializer):
     team_name = serializers.CharField(source="team.name", read_only=True)
 
@@ -62,3 +72,7 @@ class EventSerializer(serializers.ModelSerializer):
         if team.pk not in (match.home_id, match.away_id):
             raise serializers.ValidationError("Команда не грає в цьому матчі.")
         return team
+
+
+
+

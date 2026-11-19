@@ -1,12 +1,17 @@
 """В'юхи табло: турніри (read-only), матчі (+ події через @action), табло."""
-
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.reverse import reverse
+from .filters import MatchFilter
+from rest_framework.filters import SearchFilter,OrderingFilter
+from .pagination import StandardResultsSetPagination
+from rest_framework_csv import renderers as r
 
 from .models import Match, Tournament
-from .serializers import EventSerializer, MatchSerializer, TournamentSerializer
+from .serializers import EventSerializer, MatchSerializer, TournamentSerializer , MatchDetailSerializer
+
 
 # Єдині дозволені переходи стану.
 ALLOWED_TRANSITIONS = {
@@ -28,9 +33,22 @@ class TournamentViewSet(viewsets.ReadOnlyModelViewSet):
 
 class MatchViewSet(viewsets.ModelViewSet):
     queryset = Match.objects.all()
-    serializer_class = MatchSerializer
+    # serializer_class = MatchSerializer
     # Без "put": повна заміна матчу контрактом не передбачена → 405.
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    filter_backends = [DjangoFilterBackend, SearchFilter,OrderingFilter]
+    filterset_class = MatchFilter
+    search_fields = ["home__name", "away__name"]
+    ordering_fields = ["starts_at"]
+    pagination_class = StandardResultsSetPagination
+    renderer_classes = [r.CSVRenderer]
+
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return MatchDetailSerializer
+        return MatchSerializer
+
 
     def perform_create(self, serializer):
         # status із тіла запиту ігноруємо: новий матч завжди scheduled.
@@ -92,5 +110,8 @@ class MatchViewSet(viewsets.ModelViewSet):
 @api_view(["GET"])
 def scoreboard(request):
     """Зведений звіт: матчі, що тривають, голим масивом, за starts_at."""
-    matches = Match.objects.filter(status=Match.Status.LIVE).order_by("starts_at", "id")
+    matches = Match.objects.filter(status=Match.Status.LIVE).order_by("starts_at", "-id")
     return Response(MatchSerializer(matches, many=True).data)
+
+
+
